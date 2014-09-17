@@ -38,7 +38,7 @@
 package com.ibm.ecm.cmis.extensions;
 
 import java.math.BigInteger;
-
+import org.apache.chemistry.opencmis.commons.data.ContentStream;
 import org.apache.chemistry.opencmis.commons.data.ExtensionsData;
 import org.apache.chemistry.opencmis.commons.data.ObjectInFolderList;
 import org.apache.chemistry.opencmis.commons.data.ObjectList;
@@ -78,13 +78,16 @@ public class BasicPchListener extends AbstractCmisServiceWrapper {
 	// PCH objects (listener events and accumulators)
 	protected static Listener listener = null;
 
-	public static final String[] eventNames = { "getChildren", "query" };
+	public static final String[] eventNames = { "allRequests", "query",
+			"getChildren", "getContentStream" };
 	public static final Event[] events = new Event[eventNames.length];
 	public static final Accumulator[] durations = new Accumulator[eventNames.length];
 
 	public static Container cmisContainer = null;
-	public static final int GET_CHILDREN_EVENT_INDEX = 0;
+	public static final int ALL_REQUESTS_INDEX = 0;
 	public static final int QUERY_EVENT_INDEX = 1;
+	public static final int GET_CHILDREN_EVENT_INDEX = 2;
+	public static final int GET_CONTENT_STREAM_INDEX = 3;
 
 	/**
 	 * Initializes the wrapper with a set of optional parameters from the
@@ -111,20 +114,53 @@ public class BasicPchListener extends AbstractCmisServiceWrapper {
 			// setup all of the other objects now as well
 			cmisContainer = listener.lookupContainer("cmisContainer");
 
-			events[GET_CHILDREN_EVENT_INDEX] = cmisContainer.lookupEvent(
-					PCHeventClass.RPC, "getChildren");
-			events[QUERY_EVENT_INDEX] = cmisContainer.lookupEvent(
-					PCHeventClass.RPC, "query");
+			// this one will be a catch all for any requests
+			// (unfiltered by type)
+			events[ALL_REQUESTS_INDEX] = cmisContainer.lookupEvent(
+					PCHeventClass.RPC, "allEvents");
 
-			// create array for events and durations - one for each CMIS operation 
-			durations[GET_CHILDREN_EVENT_INDEX] = events[GET_CHILDREN_EVENT_INDEX]
-					.lookupAccumulator("getChildrenTime");
-			durations[QUERY_EVENT_INDEX] = events[QUERY_EVENT_INDEX]
-					.lookupAccumulator("queryTime");
+			/**
+			 * Example of how to manually set up the events :
+			 *  
+			 * // filtered events events[GET_CHILDREN_EVENT_INDEX] =
+			 * cmisContainer.lookupEvent( PCHeventClass.RPC, "getChildren");
+			 * events[QUERY_EVENT_INDEX] = cmisContainer.lookupEvent(
+			 * PCHeventClass.RPC, "query"); events[GET_CONTENT_STREAM_INDEX] =
+			 * cmisContainer.lookupEvent( PCHeventClass.RPC,
+			 * "getContentStream");
+			 * 
+			 * // create array for events and durations // one for each CMIS
+			 * operation durations[GET_CHILDREN_EVENT_INDEX] =
+			 * events[GET_CHILDREN_EVENT_INDEX]
+			 * .lookupAccumulator("getChildrenTime");
+			 * durations[QUERY_EVENT_INDEX] = events[QUERY_EVENT_INDEX]
+			 * .lookupAccumulator("queryTime");
+			 * durations[GET_CONTENT_STREAM_INDEX] =
+			 * events[GET_CONTENT_STREAM_INDEX]
+			 * .lookupAccumulator("getContentStreamTime");
+			 * 
+			 * Loop below handles any that you put in the events list automatically
+			 */
+
+			// Setup all the events that are defined in the eventNames array.			
+			// Starting at 1 since we want to skip the allEvents event.
+			for (int i = 1; i < events.length; i++) {
+
+				String tempEvent = eventNames[i];
+				System.out.println("setting up event:" + tempEvent);
+				// setup all the event objects
+				events[i] = cmisContainer.lookupEvent(PCHeventClass.RPC, tempEvent);
+				// and their matching accumulator named xxxTime.
+				durations[i] = events[i].lookupAccumulator(tempEvent + "Time");
+			}
 		}
+
+		// Record this event - whatever type it might be
+		// All requests will come through the init method. 
+		events[ALL_REQUESTS_INDEX].recordEvent();
 	}
 
-	// provide constructor (abstract base) 
+	// provide constructor (abstract base)
 	public BasicPchListener(CmisService service) {
 		super(service);
 
@@ -167,6 +203,22 @@ public class BasicPchListener extends AbstractCmisServiceWrapper {
 
 		// passing true here will cause the associated event to record +1
 		dur.stop(true);
+		return retVal;
+	}
+
+	@Override
+	public ContentStream getContentStream(String repositoryId, String objectId,
+			String streamId, BigInteger offset, BigInteger length,
+			ExtensionsData extension) {
+
+		Duration dur = listener
+				.durationFactory(durations[GET_CONTENT_STREAM_INDEX]);
+
+		dur.start();
+		ContentStream retVal = getWrappedService().getContentStream(
+				repositoryId, objectId, streamId, offset, length, extension);
+		dur.stop(true);
+
 		return retVal;
 	}
 }
